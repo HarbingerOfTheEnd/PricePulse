@@ -354,6 +354,7 @@ dependencies = [
     { name = "apscheduler" },
     { name = "beautifulsoup4" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "python-dotenv" },
     { name = "sqlmodel" },
 ]
 
@@ -369,6 +370,7 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.11.0" },
     { name = "beautifulsoup4", specifier = ">=4.13.4" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.12" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
 ]
 
