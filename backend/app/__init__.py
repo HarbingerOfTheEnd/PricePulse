@@ -63,7 +63,7 @@ engine = create_engine(
     echo=False,
     future=True,
 )
-SessionDependency = Annotated[Session, Depends(get_session)]
+type SessionDependency = Annotated[Session, Depends(get_session)]
 
 
 def schedule_price_fetch(product_id: int, user_id: int, product_url: str) -> None:
