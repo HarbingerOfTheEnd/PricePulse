@@ -39,7 +39,7 @@ def get_session() -> Generator[Session, None, None]:
 
 
 class _Product(BaseModel):
-    product_url: HttpUrl
+    product_url: str
     issued_by_id: int
 
 
