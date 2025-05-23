@@ -9,10 +9,10 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { env } from "@/env";
+import { api } from "@/lib/utils";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import axios from "axios";
 import type { ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -47,7 +47,10 @@ function RouteComponent(): ReactNode {
     });
     const mutation = useMutation({
         mutationFn: async (data: FormSchema): Promise<Response> => {
-            const response = await axios.post(`${env.SERVER_URL}/signup`, data);
+            const response = await api.post(
+                `${env.VITE_SERVER_URL}/signup`,
+                data,
+            );
             console.log(response);
 
             return response.data as Response;
@@ -55,13 +58,13 @@ function RouteComponent(): ReactNode {
         onSuccess: (data: Response) => {
             if (localStorage)
                 localStorage.setItem("userId", data.userId.toString());
-            navigate({ to: "/" });
+            navigate({ to: "/dashboard" });
         },
     });
 
-    const onSubmit = (data: FormSchema): void => {
+    const onSubmit = async (data: FormSchema): Promise<void> => {
         console.log({ data });
-        mutation.mutate(data);
+        await mutation.mutateAsync(data);
     };
 
     return (
