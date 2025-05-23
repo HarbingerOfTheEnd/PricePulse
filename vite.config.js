@@ -25,6 +25,11 @@ export default defineConfig({
         },
     },
     root: resolve(__dirname, "frontend"),
+    build: {
+        outDir: resolve(__dirname, "frontend/dist"),
+        emptyOutDir: true,
+        sourcemap: true,
+    },
     publicDir: resolve(__dirname, "frontend/public"),
     server: {
         port: 3000,
