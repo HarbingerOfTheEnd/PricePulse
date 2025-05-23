@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from json import JSONDecodeError, dumps, loads
-from typing import Annotated, Any
+from typing import Annotated, Any, Sequence
 from urllib.parse import quote_plus
 from uuid import uuid4
 
@@ -14,13 +14,13 @@ from apscheduler.triggers.interval import IntervalTrigger  # type: ignore
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from httpx import AsyncClient
 from pydantic import BaseModel, HttpUrl
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from backend.app.models.tracked_product import TrackedProduct
-from backend.app.models.user import User
+from backend.app.models import ProductPrice, TrackedProduct, User
 
 load_dotenv()
 
@@ -53,6 +53,12 @@ url = f"postgresql+psycopg2://{user}:{quote_plus(password)}@{host}:{port}/{datab
 
 jobstores = {"default": SQLAlchemyJobStore(url=url)}
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 scheduler = AsyncIOScheduler(jobstores=jobstores)
 active_connections: dict[str, Queue[dict[str, Any]]] = {}
 latest_price_data: dict[tuple[int, int], dict[str, Any]] = {}
@@ -63,7 +69,7 @@ engine = create_engine(
     echo=False,
     future=True,
 )
-type SessionDependency = Annotated[Session, Depends(get_session)]
+SessionDependency = Annotated[Session, Depends(get_session)]
 
 
 def schedule_price_fetch(product_id: int, user_id: int, product_url: str) -> None:
@@ -110,6 +116,7 @@ async def broadcast_price_update(
 
 async def event_generator(
     request: Request,
+    session: Session,
     connection_id: str,
     product_id: int,
     user_id: int,
@@ -140,6 +147,13 @@ async def event_generator(
                 try:
                     data = await wait_for(message_queue.get(), timeout=30.0)
                     data["type"] = "price_data"
+                    price = ProductPrice(
+                        product_id=product_id,
+                        price=data["price"],
+                        price_at=datetime.now(),
+                    )
+                    session.add(price)
+                    session.commit()
                     yield f"data: {dumps(data)}\n\n"
                     last_keepalive = datetime.now()
 
@@ -382,17 +396,17 @@ async def signup(
     return {"message": "User created successfully", "user_id": user.id}
 
 
-@app.get("/signin")
+@app.post("/signin")
 async def signin(
     user: User,
     session: SessionDependency,
     response: Response,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     db_user = session.exec(select(User).where(User.email == user.email)).first()
 
     if db_user and db_user.password == user.password:
         response.status_code = 200
-        return {"message": "Login successful"}
+        return {"message": "Login successful", "user_id": db_user.id}
 
     response.status_code = 401
     return {"message": "Invalid credentials"}
@@ -415,6 +429,35 @@ async def track_product(
 
     response.status_code = 201
     return {"message": "Product tracked successfully", "id": product.id}
+
+
+@app.get("/products")
+async def get_products(
+    user_id: int,
+    session: SessionDependency,
+) -> Sequence[TrackedProduct]:
+    products = session.exec(
+        select(TrackedProduct).where(TrackedProduct.issued_by_id == user_id)
+    ).all()
+    return products
+
+
+@app.get("/products/{product_id}")
+async def get_product(
+    product_id: int,
+    user_id: int,
+    session: SessionDependency,
+) -> TrackedProduct | dict[str, str]:
+    product = session.exec(
+        select(TrackedProduct).where(
+            TrackedProduct.id == product_id and TrackedProduct.issued_by_id == user_id
+        )
+    ).first()
+
+    if not product:
+        return {"message": "Product not found"}
+
+    return product
 
 
 @app.get("/track-price", response_model=None)
@@ -443,7 +486,13 @@ async def track_price(
     schedule_price_fetch(product_id, user_id, product.amazon_url)
 
     return StreamingResponse(
-        event_generator(request, connection_id, product_id, user_id),
+        event_generator(
+            request,
+            session,
+            connection_id,
+            product_id,
+            user_id,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

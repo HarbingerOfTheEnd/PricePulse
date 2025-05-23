@@ -1,68 +1,150 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { createFileRoute } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
+import { env } from "@/env";
+import { api } from "@/lib/utils";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { PlusIcon } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
+
+type Product = {
+    id: string;
+    price: number;
+    priceAt: string;
+};
 
 export const Route = createFileRoute("/dashboard")({
     component: RouteComponent,
 });
 
 function RouteComponent(): ReactNode {
-    return (
-        <div className="min-h-screen bg-gradient-to-b from-blue-200 to-white p-6 flex flex-col items-center gap-6">
-            <h1 className="text-xl font-semibold text-center text-blue-900">
-                PricePulse - E-Commerce Price Tracker
-            </h1>
+    const [userId, setUserId] = useState<string | null>(null);
+    const [amazonUrl, setAmazonUrl] = useState("");
+    const navigate = useNavigate();
 
-            <div className="flex w-full max-w-lg gap-2">
-                <Input placeholder="Enter Amazon Product URL:" />
-                <Button className="bg-green-500 hover:bg-green-600">
-                    Track
-                </Button>
+    useEffect(() => {
+        const storedUserId = localStorage.getItem("userId");
+        setUserId(storedUserId);
+    }, []);
+
+    const {
+        data: products,
+        isLoading,
+        error,
+    } = useQuery({
+        queryKey: ["products", userId],
+        queryFn: async () => {
+            if (!userId) throw new Error("User ID not found");
+            const response = await api.get(`${env.VITE_SERVER_URL}/products`, {
+                params: { user_id: userId },
+            });
+            return response.data as Product[];
+        },
+        enabled: !!userId,
+    });
+
+    if (isLoading) {
+        return (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[...Array(6)].map((_, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: <explanation>
+                    <Card key={index}>
+                        <CardHeader>
+                            <Skeleton className="h-6 w-1/2" />
+                        </CardHeader>
+                        <CardContent>
+                            <Skeleton className="h-4 w-full mb-2" />
+                            <Skeleton className="h-4 w-3/4" />
+                        </CardContent>
+                    </Card>
+                ))}
             </div>
+        );
+    }
 
-            <Card className="w-full max-w-lg">
-                <CardHeader>
-                    <CardTitle className="text-md font-semibold">
-                        Product Preview:
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="flex items-center gap-4">
-                    <div className="w-20 h-20 bg-gray-200 rounded" />{" "}
-                    {/* Image Placeholder */}
-                    <div>
-                        <p>Samsung Galaxy M14</p>
-                        <p className="text-sm text-muted-foreground">
-                            Current Price: ₹13,499
-                        </p>
+    if (error) {
+        return (
+            <div className="text-red-500">
+                Error fetching products: {error.message}
+            </div>
+        );
+    }
+
+    const handleSubmit = async () => {
+        if (!amazonUrl) return;
+        try {
+            const response = await api.post(
+                `${env.VITE_SERVER_URL}/track-product`,
+                {
+                    issued_by_id: userId,
+                    product_url: amazonUrl,
+                    name: "lmao",
+                },
+            );
+            setAmazonUrl("");
+
+            navigate({
+                to: "/dashboard/$productId",
+                params: { productId: response.data.id },
+            });
+        } catch (error) {
+            console.error("Error adding product:", error);
+        }
+    };
+
+    return (
+        <div className="p-6">
+            <h1 className="text-2xl font-semibold mb-4">Your Products</h1>
+            <Popover>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" className="mb-4">
+                        <PlusIcon className="h-5 w-5 mr-2" />
+                        Add Product
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-96 p-4">
+                    <div className="space-y-4">
+                        <Input
+                            placeholder="Enter Amazon Product URL"
+                            value={amazonUrl}
+                            onChange={(e) => setAmazonUrl(e.target.value)}
+                        />
+                        <Button
+                            variant="default"
+                            onClick={handleSubmit}
+                            disabled={!amazonUrl}
+                        >
+                            Go to Product
+                        </Button>
                     </div>
-                </CardContent>
-            </Card>
-
-            <Card className="w-full max-w-lg h-48">
-                <CardHeader>
-                    <CardTitle className="text-md font-semibold">
-                        Price History Graph:
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="flex items-center justify-center text-gray-400">
-                    [Graph Placeholder]
-                </CardContent>
-            </Card>
-
-            <Card className="w-full max-w-lg">
-                <CardHeader>
-                    <CardTitle className="text-md font-semibold">
-                        Available on Other Platforms (Bonus):
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm space-y-1">
-                    <p>- Flipkart: ₹13,299</p>
-                    <p>- Meesho: ₹13,499</p>
-                    <p>- BigBasket: Not Available</p>
-                </CardContent>
-            </Card>
+                </PopoverContent>
+            </Popover>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+                {products?.map((product) => (
+                    <Card key={product.id}>
+                        <CardHeader>
+                            <CardTitle>{product.id}</CardTitle>
+                            <CardDescription>₹{product.price}</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <p>{product.price}</p>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
         </div>
     );
 }
