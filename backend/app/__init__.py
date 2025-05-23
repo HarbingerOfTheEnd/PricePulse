@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from json import JSONDecodeError, dumps, loads
-from typing import Annotated, Any
+from typing import Annotated, Any, Sequence
 from urllib.parse import quote_plus
 from uuid import uuid4
 
@@ -14,13 +14,13 @@ from apscheduler.triggers.interval import IntervalTrigger  # type: ignore
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from httpx import AsyncClient
 from pydantic import BaseModel, HttpUrl
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from backend.app.models.tracked_product import TrackedProduct
-from backend.app.models.user import User
+from backend.app.models import ProductPrice, TrackedProduct, User
 
 load_dotenv()
 
@@ -39,7 +39,6 @@ def get_session() -> Generator[Session, None, None]:
 
 
 class _Product(BaseModel):
-    name: str
     product_url: HttpUrl
     issued_by_id: int
 
@@ -53,6 +52,12 @@ url = f"postgresql+psycopg2://{user}:{quote_plus(password)}@{host}:{port}/{datab
 
 jobstores = {"default": SQLAlchemyJobStore(url=url)}
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 scheduler = AsyncIOScheduler(jobstores=jobstores)
 active_connections: dict[str, Queue[dict[str, Any]]] = {}
 latest_price_data: dict[tuple[int, int], dict[str, Any]] = {}
@@ -63,7 +68,7 @@ engine = create_engine(
     echo=False,
     future=True,
 )
-type SessionDependency = Annotated[Session, Depends(get_session)]
+SessionDependency = Annotated[Session, Depends(get_session)]
 
 
 def schedule_price_fetch(product_id: int, user_id: int, product_url: str) -> None:
@@ -110,13 +115,11 @@ async def broadcast_price_update(
 
 async def event_generator(
     request: Request,
+    session: Session,
     connection_id: str,
     product_id: int,
     user_id: int,
 ) -> AsyncGenerator[str, None]:
-    """
-    Event stream that yields data exactly once every 30 minutes with keepalive messages.
-    """
     try:
         yield f"data: {dumps({'type': 'connected', 'connection_id': connection_id, 'timestamp': datetime.now().isoformat()})}\n\n"
 
@@ -140,6 +143,14 @@ async def event_generator(
                 try:
                     data = await wait_for(message_queue.get(), timeout=30.0)
                     data["type"] = "price_data"
+                    price = ProductPrice(
+                        product_id=product_id,
+                        price=data["price"],
+                        price_at=datetime.now(),
+                    )
+                    session.add(price)
+                    session.commit()
+                    data["name"] = price.product.name
                     yield f"data: {dumps(data)}\n\n"
                     last_keepalive = datetime.now()
 
@@ -178,7 +189,6 @@ async def fetch_price_data(
 ) -> dict[str, Any]:
     try:
         async with AsyncClient(timeout=30.0) as client:
-            # Rotate between different user agents
             user_agents = [
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -209,9 +219,7 @@ async def fetch_price_data(
 
             soup = BeautifulSoup(response.text, "html.parser")
 
-            # Multiple price selectors to try (Amazon changes these frequently)
             price_selectors = [
-                # Current price selectors
                 "span.a-price-whole",
                 "span#priceblock_dealprice",
                 "span#priceblock_ourprice",
@@ -219,33 +227,26 @@ async def fetch_price_data(
                 "span.a-price .a-offscreen",
                 "span.a-price-range .a-price .a-offscreen",
                 ".a-price .a-offscreen",
-                # Alternative selectors
                 "span.a-price-whole.a-color-price",
                 "td.a-color-price.a-size-medium",
                 ".a-price-whole",
                 "span[data-a-size='xl'] .a-price-whole",
-                # Older selectors (still sometimes used)
                 "#price_inside_buybox",
                 ".sx-price-whole",
                 ".a-size-medium.a-color-price",
-                # Deal/sale price selectors
                 "span.a-size-base.a-color-price",
                 ".a-color-price.header-price",
-                # Mobile/different layout selectors
                 ".a-price-lg .a-price-whole",
                 "span.a-size-large.a-color-price",
-                # JSON-LD structured data fallback
                 'script[type="application/ld+json"]',
             ]
 
             price = None
             used_selector = None
 
-            # Try each selector
             for selector in price_selectors:
                 try:
                     if selector == 'script[type="application/ld+json"]':
-                        # Special handling for JSON-LD structured data
                         price = extract_price_from_json_ld(soup)
                         if price:
                             used_selector = "JSON-LD"
@@ -325,7 +326,6 @@ def extract_price_from_json_ld(soup: BeautifulSoup) -> float | None:
 
 
 def extract_price_from_json_object(obj: Any) -> float | None:
-    """Recursively extract price from JSON object."""
     if isinstance(obj, dict):
         price_fields = ["price", "lowPrice", "highPrice", "value"]
         for field in price_fields:
@@ -338,7 +338,6 @@ def extract_price_from_json_object(obj: Any) -> float | None:
                     if extracted:
                         return extracted
 
-        # Look for offers
         if "offers" in obj:
             offers = obj["offers"]  # type: ignore
             if isinstance(offers, list):
@@ -351,7 +350,6 @@ def extract_price_from_json_object(obj: Any) -> float | None:
                 if price:
                     return price
 
-        # Recursively search other fields
         for value in obj.values():  # type: ignore
             if isinstance(value, (dict, list)):
                 price = extract_price_from_json_object(value)
@@ -382,20 +380,30 @@ async def signup(
     return {"message": "User created successfully", "user_id": user.id}
 
 
-@app.get("/signin")
+@app.post("/signin")
 async def signin(
     user: User,
     session: SessionDependency,
     response: Response,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     db_user = session.exec(select(User).where(User.email == user.email)).first()
 
     if db_user and db_user.password == user.password:
         response.status_code = 200
-        return {"message": "Login successful"}
+        return {"message": "Login successful", "user_id": db_user.id}
 
     response.status_code = 401
     return {"message": "Invalid credentials"}
+
+
+async def get_product_name(amazon_url: str) -> str:
+    async with AsyncClient() as client:
+        response = await client.get(amazon_url)
+        soup = BeautifulSoup(response.text, "html.parser")
+        title_tag = soup.select_one("productTitle")
+        if title_tag:
+            return title_tag.get_text(strip=True)
+    return "Unknown Product"
 
 
 @app.post("/track-product")
@@ -405,8 +413,9 @@ async def track_product(
     response: Response,
 ) -> dict[str, Any]:
     url = request.product_url
-    name = request.name
     issued_by_id = request.issued_by_id
+
+    name = await get_product_name(url)
 
     product = TrackedProduct(amazon_url=str(url), issued_by_id=issued_by_id, name=name)
     session.add(product)
@@ -415,6 +424,54 @@ async def track_product(
 
     response.status_code = 201
     return {"message": "Product tracked successfully", "id": product.id}
+
+
+@app.get("/products")
+async def get_products(
+    user_id: int,
+    session: SessionDependency,
+) -> Sequence[TrackedProduct]:
+    products = session.exec(
+        select(TrackedProduct).where(TrackedProduct.issued_by_id == user_id)
+    ).all()
+    return products
+
+
+@app.get("/products/{product_id}")
+async def get_product(
+    product_id: int,
+    user_id: int,
+    session: SessionDependency,
+) -> TrackedProduct | dict[str, str]:
+    product = session.exec(
+        select(TrackedProduct).where(
+            TrackedProduct.id == product_id and TrackedProduct.issued_by_id == user_id
+        )
+    ).first()
+
+    if not product:
+        return {"message": "Product not found"}
+
+    return product
+
+
+@app.get("/prices")
+async def get_prices(
+    product_id: int,
+    user_id: int,
+    session: SessionDependency,
+) -> Sequence[ProductPrice] | dict[str, str]:
+    prices = session.exec(
+        select(ProductPrice).where(
+            ProductPrice.product_id == product_id
+            and ProductPrice.product.issued_by_id == user_id
+        )
+    ).all()
+
+    if not prices:
+        return {"message": "No prices found for this product"}
+
+    return prices
 
 
 @app.get("/track-price", response_model=None)
@@ -443,7 +500,13 @@ async def track_price(
     schedule_price_fetch(product_id, user_id, product.amazon_url)
 
     return StreamingResponse(
-        event_generator(request, connection_id, product_id, user_id),
+        event_generator(
+            request,
+            session,
+            connection_id,
+            product_id,
+            user_id,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
