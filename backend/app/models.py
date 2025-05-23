@@ -26,7 +26,10 @@ class TrackedProduct(SQLModel, table=True):
     issued_by_id: int | None = Field(default=None, foreign_key="users.id")
     issued_by: User | None = Relationship(back_populates="tracked_products")
 
-    product_prices: list["ProductPrice"] = Relationship(back_populates="product")
+    product_prices: list["ProductPrice"] = Relationship(
+        back_populates="product",
+        sa_relationship_kwargs={"cascade": "all, delete"},
+    )
 
 
 class ProductPrice(SQLModel, table=True):
