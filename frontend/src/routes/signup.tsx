@@ -51,7 +51,6 @@ function RouteComponent(): ReactNode {
                 `${env.VITE_SERVER_URL}/signup`,
                 data,
             );
-            console.log(response);
 
             return response.data as Response;
         },
@@ -63,7 +62,6 @@ function RouteComponent(): ReactNode {
     });
 
     const onSubmit = async (data: FormSchema): Promise<void> => {
-        console.log({ data });
         await mutation.mutateAsync(data);
     };
 

@@ -45,7 +45,6 @@ function RouteComponent(): ReactNode {
     const navigate = useNavigate();
     const mutation = useMutation({
         mutationFn: async (data: FormSchema): Promise<Response> => {
-            console.log(data);
             const response = await api.post(
                 `${env.VITE_SERVER_URL}/signin`,
                 data,
@@ -59,7 +58,6 @@ function RouteComponent(): ReactNode {
         },
     });
     const onSubmit = async (data: FormSchema): Promise<void> => {
-        console.log({ data });
         await mutation.mutateAsync(data);
     };
 
