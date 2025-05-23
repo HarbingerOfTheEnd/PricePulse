@@ -99,7 +99,8 @@ function RouteComponent(): ReactNode {
                 params: { user_id: userId, product_id: productId },
             });
 
-            setLivePrices(response.data as Price[]);
+            if (typeof response.data !== "object")
+                setLivePrices(response.data as Price[]);
         })();
 
         const trackPricesUrl = new URL(
@@ -170,6 +171,11 @@ function RouteComponent(): ReactNode {
                     />
                 </div>
             </CardContent>
+            {livePrices.length === 0 && (
+                <div className="text-center text-gray-500">
+                    No price data available.
+                </div>
+            )}
         </Card>
     );
 }

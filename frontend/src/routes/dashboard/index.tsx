@@ -14,26 +14,31 @@ import {
 } from "@/components/ui/popover";
 import { env } from "@/env";
 import { api } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-
-type Product = {
-    id: number;
-    issuedById: number;
-    name: string;
-    amazonUrl: string;
-};
+import { PlusIcon, Trash2Icon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export const Route = createFileRoute("/dashboard/")({
     component: RouteComponent,
+    beforeLoad: () => {
+        document.title = "Dashboard - Price Tracker";
+    },
 });
 
-function RouteComponent(): ReactNode {
+type Product = {
+    id: string;
+    name: string;
+    price: number;
+    amazonUrl: string;
+    issuedById: number;
+};
+
+export default function RouteComponent(): React.ReactNode {
     const [userId, setUserId] = useState<string | null>(null);
     const [amazonUrl, setAmazonUrl] = useState("");
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
 
     useEffect(() => {
         const storedUserId = localStorage.getItem("userId");
@@ -74,6 +79,17 @@ function RouteComponent(): ReactNode {
             });
         } catch (error) {
             console.error("Error adding product:", error);
+        }
+    };
+
+    const handleDelete = async (productId: string) => {
+        try {
+            await api.delete(`${env.VITE_SERVER_URL}/products/${productId}`, {
+                params: { user_id: userId },
+            });
+            queryClient.invalidateQueries({ queryKey: ["products", userId] });
+        } catch (error) {
+            console.error("Error deleting product:", error);
         }
     };
 
@@ -134,8 +150,16 @@ function RouteComponent(): ReactNode {
                     {products?.map((p) => (
                         <Card
                             key={p.id}
-                            className="hover:shadow-lg transition-shadow"
+                            className="hover:shadow-lg transition-shadow relative"
                         >
+                            <Button
+                                variant="ghost"
+                                className="absolute top-2 right-2 text-red-500 hover:text-red-700"
+                                onClick={() => handleDelete(p.id)}
+                                size="icon"
+                            >
+                                <Trash2Icon className="w-5 h-5" />
+                            </Button>
                             <Link
                                 to="/dashboard/$productId"
                                 params={{ productId: p.id.toString() }}
