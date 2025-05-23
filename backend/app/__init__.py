@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from httpx import AsyncClient
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend.app.models import ProductPrice, TrackedProduct, User
@@ -400,7 +400,7 @@ async def get_product_name(amazon_url: str) -> str:
     async with AsyncClient() as client:
         response = await client.get(amazon_url)
         soup = BeautifulSoup(response.text, "html.parser")
-        title_tag = soup.select_one("productTitle")
+        title_tag = soup.select_one("span#productTitle")
         if title_tag:
             return title_tag.get_text(strip=True)
     return "Unknown Product"
@@ -424,6 +424,27 @@ async def track_product(
 
     response.status_code = 201
     return {"message": "Product tracked successfully", "id": product.id}
+
+
+@app.delete("/products/{product_id}")
+async def delete_product(
+    product_id: int,
+    user_id: int,
+    session: SessionDependency,
+) -> dict[str, str]:
+    product = session.exec(
+        select(TrackedProduct).where(
+            TrackedProduct.id == product_id and TrackedProduct.issued_by_id == user_id
+        )
+    ).first()
+
+    if not product:
+        return {"message": "Product not found"}
+
+    session.delete(product)
+    session.commit()
+
+    return {"message": "Product deleted successfully"}
 
 
 @app.get("/products")
