@@ -13,6 +13,7 @@ import { api } from "@/lib/utils";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import type { AxiosError } from "axios";
 import type { ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -28,10 +29,14 @@ const formSchema = z.object({
         .min(8)
         .regex(/[A-Za-z0-9]*/),
 });
+
 type FormSchema = z.infer<typeof formSchema>;
 type Response = {
     message: string;
     userId: number;
+};
+type ErrorResponse = {
+    message: string;
 };
 
 function RouteComponent(): ReactNode {
@@ -55,6 +60,13 @@ function RouteComponent(): ReactNode {
             if (localStorage)
                 localStorage.setItem("userId", data.userId.toString());
             navigate({ to: "/dashboard" });
+        },
+        onError: (error: AxiosError<ErrorResponse>): void => {
+            if (error.response?.data) {
+                alert(error.response.data.message);
+            } else {
+                alert("An unexpected error occurred. Please try again.");
+            }
         },
     });
     const onSubmit = async (data: FormSchema): Promise<void> => {
