@@ -96,7 +96,7 @@ function RouteComponent(): ReactNode {
 
         (async () => {
             const response = await api.get("/prices", {
-                params: { user_id: userId },
+                params: { user_id: userId, product_id: productId },
             });
 
             if (Array.isArray(response.data))
