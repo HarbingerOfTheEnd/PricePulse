@@ -14,7 +14,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { AxiosError } from "axios";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -47,6 +47,7 @@ function RouteComponent(): ReactNode {
             password: "",
         },
     });
+    const [error, setError] = useState<string>("");
     const navigate = useNavigate();
     const mutation = useMutation({
         mutationFn: async (data: FormSchema): Promise<Response> => {
@@ -63,14 +64,14 @@ function RouteComponent(): ReactNode {
         },
         onError: (error: AxiosError<ErrorResponse>): void => {
             if (error.response?.data) {
-                alert(error.response.data.message);
+                setError(error.response.data.message);
             } else {
-                alert("An unexpected error occurred. Please try again.");
+                setError("An unexpected error occurred.");
             }
         },
     });
     const onSubmit = async (data: FormSchema): Promise<void> => {
-        await mutation.mutateAsync(data);
+        mutation.mutate(data);
     };
 
     return (
@@ -123,6 +124,11 @@ function RouteComponent(): ReactNode {
                         </Button>
                     </form>
                 </Form>
+                {error && (
+                    <div className="mt-4 text-red-600">
+                        <p>{error}</p>
+                    </div>
+                )}
             </div>
         </div>
     );
