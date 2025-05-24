@@ -96,10 +96,10 @@ function RouteComponent(): ReactNode {
 
         (async () => {
             const response = await api.get("/prices", {
-                params: { user_id: userId, product_id: productId },
+                params: { user_id: userId },
             });
 
-            if (typeof response.data !== "object")
+            if (Array.isArray(response.data))
                 setLivePrices(response.data as Price[]);
         })();
 
